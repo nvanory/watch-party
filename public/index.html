@@ -20,16 +20,15 @@
         <input type="text" id="videoUrlInput" placeholder="Вставьте прямую ссылку на видео (например, .mp4)">
         <button id="loadVideoBtn">Загрузить</button>
     </div>
-    <video id="myVideo" controls>
-        <source id="videoSource" src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
-    </video>
+    
+    <video id="myVideo" controls src="https://www.w3schools.com/html/mov_bbb.mp4"></video>
+    
     <div id="roomInfo">Подключение...</div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
         const video = document.getElementById('myVideo');
-        const videoSource = document.getElementById('videoSource');
         const urlInput = document.getElementById('videoUrlInput');
         
         const urlParams = new URLSearchParams(window.location.search);
@@ -42,16 +41,31 @@
         socket.emit('join_room', roomId);
         document.getElementById('roomInfo').innerHTML = `Вы в комнате: <b>${roomId}</b><br>Скопируйте ссылку и отправьте друзьям.`;
 
-        let isExternal = false;
+        // Флаг защиты от "эха". Если true — мы игнорируем действия плеера, так как ими управляет сервер
+        let isSyncing = false;
+
+        function lockSync() {
+            isSyncing = true;
+            // Снимаем блокировку через 100мс (достаточно, чтобы плеер успел выполнить команду сервера)
+            setTimeout(() => { isSyncing = false; }, 100);
+        }
+
+        // --- 1. ОТПРАВКА КОМАНД ОТ НАС ---
 
         video.addEventListener('play', () => {
-            if (!isExternal) socket.emit('play_video', { roomId, time: video.currentTime });
-            isExternal = false;
+            if (isSyncing) return;
+            socket.emit('play_video', { roomId, time: video.currentTime });
         });
 
         video.addEventListener('pause', () => {
-            if (!isExternal) socket.emit('pause_video', roomId);
-            isExternal = false;
+            if (isSyncing) return;
+            socket.emit('pause_video', roomId);
+        });
+
+        // Добавили отслеживание перемотки!
+        video.addEventListener('seeked', () => {
+            if (isSyncing) return;
+            socket.emit('seek_video', { roomId, time: video.currentTime });
         });
 
         document.getElementById('loadVideoBtn').addEventListener('click', () => {
@@ -63,24 +77,32 @@
         });
 
         function changeVideo(url) {
-            videoSource.src = url;
-            video.load();
-            isExternal = true;
-            video.play().catch(() => {});
+            lockSync();
+            video.src = url; // Теперь мы надежно меняем источник видео
+            video.play().catch(() => { console.log("Ждем клика пользователя для воспроизведения"); });
         }
 
+        // --- 2. ПОЛУЧЕНИЕ КОМАНД ОТ ДРУГИХ ---
+
         socket.on('play_video', (time) => {
-            isExternal = true;
+            lockSync();
             if (Math.abs(video.currentTime - time) > 0.5) video.currentTime = time;
-            video.play();
+            video.play().catch(()=> {});
         });
 
         socket.on('pause_video', () => {
-            isExternal = true;
+            lockSync();
             video.pause();
         });
 
-        socket.on('change_video', changeVideo);
+        socket.on('seek_video', (time) => {
+            lockSync();
+            video.currentTime = time;
+        });
+
+        socket.on('change_video', (url) => {
+            changeVideo(url);
+        });
     </script>
 </body>
 </html>
