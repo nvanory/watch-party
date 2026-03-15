@@ -5,23 +5,53 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Приватный просмотр видео</title>
     <style>
-        body { text-align: center; font-family: sans-serif; background: #2c3e50; color: white; padding: 20px; }
-        video { width: 90%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: #000; }
-        .controls { margin-bottom: 20px; }
-        input[type="text"] { width: 60%; padding: 10px; border-radius: 4px; border: none; }
+        body { text-align: center; font-family: sans-serif; background: #2c3e50; color: white; padding: 20px; margin: 0; }
+        h1 { margin-top: 0; }
+        
+        /* Сетка: видео слева, чат справа */
+        .main-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        
+        .video-section { flex: 2; min-width: 300px; }
+        video { width: 100%; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: #000; }
+        
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        input[type="text"] { padding: 10px; border-radius: 4px; border: none; flex: 1; max-width: 400px; }
         button { padding: 10px 20px; border: none; border-radius: 4px; background: #e74c3c; color: white; cursor: pointer; font-weight: bold; }
         button:hover { background: #c0392b; }
+        
+        /* Стили чата */
+        .chat-section { flex: 1; min-width: 280px; max-width: 350px; background: #34495e; border-radius: 8px; display: flex; flex-direction: column; padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 450px; }
+        .chat-messages { flex: 1; overflow-y: auto; background: #2c3e50; border-radius: 4px; padding: 10px; margin-bottom: 10px; text-align: left; display: flex; flex-direction: column; gap: 8px; }
+        .msg { padding: 8px 12px; border-radius: 15px; font-size: 0.9em; max-width: 80%; word-wrap: break-word; }
+        .msg.me { background: #3498db; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg.other { background: #7f8c8d; color: white; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .chat-input-area { display: flex; gap: 5px; }
+        #chatInput { flex: 1; }
+        
         #roomInfo { margin-top: 20px; font-size: 0.9em; color: #bdc3c7; }
     </style>
 </head>
 <body>
     <h1>Приватная комната</h1>
-    <div class="controls">
-        <input type="text" id="videoUrlInput" placeholder="Вставьте прямую ссылку на видео (например, .mp4)">
-        <button id="loadVideoBtn">Загрузить</button>
-    </div>
     
-    <video id="myVideo" controls src="https://www.w3schools.com/html/mov_bbb.mp4"></video>
+    <div class="controls">
+        <input type="text" id="videoUrlInput" placeholder="Вставьте ссылку на видео (например, .mp4)">
+        <button id="loadVideoBtn">Загрузить видео</button>
+    </div>
+
+    <div class="main-container">
+        <div class="video-section">
+            <video id="myVideo" controls src=""></video>
+        </div>
+
+        <div class="chat-section">
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input-area">
+                <input type="text" id="chatInput" placeholder="Написать...">
+                <button id="sendChatBtn">Отправить</button>
+            </div>
+        </div>
+    </div>
     
     <div id="roomInfo">Подключение...</div>
 
@@ -30,7 +60,10 @@
         const socket = io();
         const video = document.getElementById('myVideo');
         const urlInput = document.getElementById('videoUrlInput');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
         
+        // --- 1. НАСТРОЙКА КОМНАТЫ ---
         const urlParams = new URLSearchParams(window.location.search);
         let roomId = urlParams.get('room');
         if (!roomId) {
@@ -41,17 +74,14 @@
         socket.emit('join_room', roomId);
         document.getElementById('roomInfo').innerHTML = `Вы в комнате: <b>${roomId}</b><br>Скопируйте ссылку и отправьте друзьям.`;
 
-        // Флаг защиты от "эха". Если true — мы игнорируем действия плеера, так как ими управляет сервер
+        // Защита от "эха" команд плеера
         let isSyncing = false;
-
         function lockSync() {
             isSyncing = true;
-            // Снимаем блокировку через 100мс (достаточно, чтобы плеер успел выполнить команду сервера)
-            setTimeout(() => { isSyncing = false; }, 100);
+            setTimeout(() => { isSyncing = false; }, 150);
         }
 
-        // --- 1. ОТПРАВКА КОМАНД ОТ НАС ---
-
+        // --- 2. ЛОГИКА ВИДЕО ---
         video.addEventListener('play', () => {
             if (isSyncing) return;
             socket.emit('play_video', { roomId, time: video.currentTime });
@@ -62,7 +92,6 @@
             socket.emit('pause_video', roomId);
         });
 
-        // Добавили отслеживание перемотки!
         video.addEventListener('seeked', () => {
             if (isSyncing) return;
             socket.emit('seek_video', { roomId, time: video.currentTime });
@@ -78,11 +107,23 @@
 
         function changeVideo(url) {
             lockSync();
-            video.src = url; // Теперь мы надежно меняем источник видео
-            video.play().catch(() => { console.log("Ждем клика пользователя для воспроизведения"); });
+            if (video.src !== url) {
+                video.src = url;
+            }
+            video.play().catch(() => { console.log("Ожидаем клика для воспроизведения"); });
         }
 
-        // --- 2. ПОЛУЧЕНИЕ КОМАНД ОТ ДРУГИХ ---
+        // Восстановление видео при обновлении страницы (данные от сервера)
+        socket.on('sync_state', (state) => {
+            lockSync();
+            if (state.videoUrl) {
+                video.src = state.videoUrl;
+                // Небольшая задержка, чтобы браузер успел обработать ссылку перед перемоткой
+                setTimeout(() => {
+                    video.currentTime = state.time;
+                }, 300);
+            }
+        });
 
         socket.on('play_video', (time) => {
             lockSync();
@@ -90,18 +131,65 @@
             video.play().catch(()=> {});
         });
 
-        socket.on('pause_video', () => {
-            lockSync();
-            video.pause();
+        socket.on('pause_video', () => { lockSync(); video.pause(); });
+        socket.on('seek_video', (time) => { lockSync(); video.currentTime = time; });
+        socket.on('change_video', (url) => { changeVideo(url); });
+
+
+        // --- 3. ЛОГИКА ЧАТА (С СОХРАНЕНИЕМ НА УСТРОЙСТВЕ) ---
+        
+        // Уникальный ключ для сохранения чата конкретной комнаты
+        const chatStorageKey = `chat_history_${roomId}`;
+        
+        // Загружаем историю из localStorage (или создаем пустой массив)
+        let chatHistory = JSON.parse(localStorage.getItem(chatStorageKey)) || [];
+
+        // Функция отрисовки сообщений
+        function renderChat() {
+            chatMessages.innerHTML = '';
+            if (chatHistory.length === 0) {
+                chatMessages.innerHTML = '<div style="color:#bdc3c7; text-align:center; margin-top:10px;">Здесь пока пусто. Напишите первое сообщение!</div>';
+            } else {
+                chatHistory.forEach(msg => {
+                    const div = document.createElement('div');
+                    div.className = `msg ${msg.type}`;
+                    div.innerText = msg.text;
+                    chatMessages.appendChild(div);
+                });
+            }
+            // Прокрутка вниз
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Функция сохранения нового сообщения
+        function saveAndShowMessage(text, type) {
+            chatHistory.push({ text: text, type: type });
+            // Сохраняем обновленный массив в память устройства
+            localStorage.setItem(chatStorageKey, JSON.stringify(chatHistory));
+            renderChat();
+        }
+
+        // Отрисовываем историю при загрузке страницы
+        renderChat();
+
+        // Отправка сообщения
+        document.getElementById('sendChatBtn').addEventListener('click', sendMessage);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
         });
 
-        socket.on('seek_video', (time) => {
-            lockSync();
-            video.currentTime = time;
-        });
+        function sendMessage() {
+            const text = chatInput.value.trim();
+            if (text) {
+                saveAndShowMessage(text, 'me'); // Показываем у себя
+                socket.emit('chat_message', { roomId, message: text }); // Отправляем другим
+                chatInput.value = ''; // Очищаем поле ввода
+            }
+        }
 
-        socket.on('change_video', (url) => {
-            changeVideo(url);
+        // Получение сообщения от других
+        socket.on('chat_message', (text) => {
+            saveAndShowMessage(text, 'other');
         });
     </script>
 </body>
