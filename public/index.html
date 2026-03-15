@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Приватный просмотр видео</title>
+    <style>
+        body { text-align: center; font-family: sans-serif; background: #2c3e50; color: white; padding: 20px; }
+        video { width: 90%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: #000; }
+        .controls { margin-bottom: 20px; }
+        input[type="text"] { width: 60%; padding: 10px; border-radius: 4px; border: none; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; background: #e74c3c; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background: #c0392b; }
+        #roomInfo { margin-top: 20px; font-size: 0.9em; color: #bdc3c7; }
+    </style>
+</head>
+<body>
+    <h1>Приватная комната</h1>
+    <div class="controls">
+        <input type="text" id="videoUrlInput" placeholder="Вставьте прямую ссылку на видео (например, .mp4)">
+        <button id="loadVideoBtn">Загрузить</button>
+    </div>
+    <video id="myVideo" controls>
+        <source id="videoSource" src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+    </video>
+    <div id="roomInfo">Подключение...</div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const video = document.getElementById('myVideo');
+        const videoSource = document.getElementById('videoSource');
+        const urlInput = document.getElementById('videoUrlInput');
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        let roomId = urlParams.get('room');
+        if (!roomId) {
+            roomId = Math.random().toString(36).substring(2, 10);
+            window.location.href = `?room=${roomId}`;
+        }
+
+        socket.emit('join_room', roomId);
+        document.getElementById('roomInfo').innerHTML = `Вы в комнате: <b>${roomId}</b><br>Скопируйте ссылку и отправьте друзьям.`;
+
+        let isExternal = false;
+
+        video.addEventListener('play', () => {
+            if (!isExternal) socket.emit('play_video', { roomId, time: video.currentTime });
+            isExternal = false;
+        });
+
+        video.addEventListener('pause', () => {
+            if (!isExternal) socket.emit('pause_video', roomId);
+            isExternal = false;
+        });
+
+        document.getElementById('loadVideoBtn').addEventListener('click', () => {
+            const url = urlInput.value;
+            if (url) {
+                changeVideo(url);
+                socket.emit('change_video', { roomId, videoUrl: url });
+            }
+        });
+
+        function changeVideo(url) {
+            videoSource.src = url;
+            video.load();
+            isExternal = true;
+            video.play().catch(() => {});
+        }
+
+        socket.on('play_video', (time) => {
+            isExternal = true;
+            if (Math.abs(video.currentTime - time) > 0.5) video.currentTime = time;
+            video.play();
+        });
+
+        socket.on('pause_video', () => {
+            isExternal = true;
+            video.pause();
+        });
+
+        socket.on('change_video', changeVideo);
+    </script>
+</body>
+</html>
